@@ -2,7 +2,7 @@
 title: "Measles and Rubella Cases"
 format: 
   dashboard:
-    orientation: columns
+    orientation: rows
     theme: sandstone
     logo: who-logo.png
     logo-alt: "World Health Organization logo with a wreath and a snake. "
@@ -41,11 +41,13 @@ library(glue)
 library(stringr)
 library(stringi)
 library(rsconnect)
+library(leaflet)
+library(plotly)
 ```
 
 ```{r}
 #| label: load-data
-#| include: falseˇ
+#| include: false
 
 cases_month <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-06-24/cases_month.csv') |>
   clean_names()
@@ -54,6 +56,15 @@ cases_year <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience
   clean_names()
 
 gdp_web <- readr::read_csv('gdp_web.csv')
+
+lat_lon <- read_csv(here::here("world-data-2023.csv")) |>
+  mutate(Country = recode_values(Country,
+                                 "Republic of the Congo" ~ "Congo",
+                                 "The Gambia" ~ "Gambia",
+                                 "The Bahamas" ~ "Bahamas",
+                                 "Czech Republic" ~ "Czechia",
+                                 "Republic of Ireland" ~ "Ireland",
+                                 default = Country))
 ```
 
 ```{r}
@@ -128,191 +139,13 @@ cases_gdp_year <- cases_year |>
     !is.na(measles_epi_linked),
     !is.na(gdp_per_capita),
     measles_epi_linked > 0
-  )
+  )|>
+  left_join(lat_lon, by = join_by("country" == "Country"))
 ```
+# Measles by GDP Worldwide
 
-## Column {width=48%}
-
-::: {.callout-note appearance="minimal"}
-**Research Question 1**
-
-Globally, has there been improvement in containing measles and rubella cases in recent years, and is there a time of year where these cases become more common?
-:::
-
-### Research Question 1: Measles and Rubella Cases Over Time
-
-::: {.panel-tabset}
-
-#### Yearly trends
-
-```{r}
-#| label: yearly-trends
-#| warning: false
-#| message: false
-#| fig-height: 6
-#| fig-width: 11
-
-annotate_text <- tibble(
-  year = c(2014.5, 2014.3),
-  y_lab = c(75000, 200000),
-  disease = c("Rubella", "Measles")
-)
-
-cases_year |>
-  group_by(year) |>
-  summarize(
-    measles = sum(measles_total, na.rm = TRUE),
-    rubella = sum(rubella_total, na.rm = TRUE),
-    .groups = "drop"
-  ) |>
-  ggplot() +
-  geom_ribbon(
-    aes(x = year, ymin = measles, ymax = rubella),
-    position = "identity",
-    inherit.aes = FALSE,
-    fill = "#F8F5F0"
-  ) +
-  geom_line(aes(x = year, y = measles, color = "Measles"), linewidth = 1) +
-  geom_line(aes(x = year, y = rubella, color = "Rubella"), linewidth = 1) +
-  scale_color_manual(
-    name = "Disease",
-    values = c("Measles" = "#325D88", "Rubella" = "#3E3F3A")
-  ) +
-  scale_x_continuous(breaks = unique(cases_year$year), expand = c(0.01, 0.01)) +
-  scale_y_continuous(
-    breaks = seq(0, 600000, by = 100000),
-    labels = scales::label_comma()
-  ) +
-  geom_text(
-    data = annotate_text,
-    mapping = aes(x = year, y = y_lab, label = disease, color = disease),
-    inherit.aes = FALSE,
-    show.legend = FALSE
-  ) +
-  theme_bw() +
-  labs(
-    x = "Year",
-    y = "Number of Cases",
-    title = "Measles and Rubella Cases Over Time",
-    subtitle = "Similar spikes occur across diseases, but measles cases are more volatile."
-  ) +
-  theme(panel.grid.minor = element_blank())
-```
-
-#### Monthly patterns
-
-```{r}
-#| label: monthly-patterns
-#| warning: false
-#| message: false
-#| fig-height: 7
-#| fig-width: 12
-
-color_gradient <- colorRampPalette(c("#A6DAF5", "#325D88"))(12)
-names(color_gradient) <- month.name
-
-measles <- cases_month |>
-  group_by(month, year) |>
-  summarise(measles_total = sum(measles_total, na.rm = TRUE), .groups = "drop") |>
-  mutate(month_full = month.name[month]) |>
-  ggplot(aes(
-    x = measles_total,
-    y = reorder(month_full, -month),
-    group = month,
-    fill = month_full
-  )) +
-  geom_density_ridges() +
-  scale_x_continuous(breaks = seq(0, 140000, by = 40000), labels = scales::label_comma()) +
-  scale_fill_manual(values = color_gradient) +
-  scale_y_discrete(expand = c(0.0001, 0.5)) +
-  theme_minimal() +
-  labs(x = "Number of Cases", y = "", title = "Measles") +
-  theme(panel.grid.minor.x = element_blank(), legend.position = "none")
-
-color_gradient <- colorRampPalette(c("#B8B9B6", "#3E3F3A"))(12)
-names(color_gradient) <- month.name
-
-rubella <- cases_month |>
-  group_by(month, year) |>
-  summarise(rubella_total = sum(rubella_total, na.rm = TRUE), .groups = "drop") |>
-  mutate(month_full = month.name[month]) |>
-  ggplot(aes(
-    x = rubella_total,
-    y = reorder(month_full, -month),
-    group = month,
-    fill = month_full
-  )) +
-  geom_density_ridges() +
-  scale_x_continuous(breaks = seq(0, 20000, by = 4000), labels = scales::label_comma()) +
-  scale_fill_manual(values = color_gradient) +
-  scale_y_discrete(expand = c(0.0001, 0.5)) +
-  theme_minimal() +
-  labs(x = "Number of Cases", y = "", title = "Rubella") +
-  theme(panel.grid.minor.x = element_blank(), legend.position = "none")
-
-(measles + rubella) +
-  plot_layout(guides = "collect", axis_titles = "collect") +
-  plot_annotation(
-    title = "Comparison of Global Measles and Rubella Cases for Each Month",
-    subtitle = "Monthly distributions span case counts from 2012 to 2025"
-  )
-```
-
-#### Peak months table
-
-```{r}
-#| label: peak-months-table
-#| warning: false
-#| message: false
-
-get_max_month <- function(yr) {
-  cases_month |>
-    filter(year == yr) |>
-    group_by(month) |>
-    summarize(
-      num_measles = sum(measles_total, na.rm = TRUE),
-      num_rubella = sum(rubella_total, na.rm = TRUE),
-      .groups = "drop"
-    ) |>
-    summarize(
-      measles_month = month[which.max(num_measles)],
-      measles_cases = max(num_measles),
-      rubella_month = month[which.max(num_rubella)],
-      rubella_cases = max(num_rubella)
-    ) |>
-    mutate(year = yr, .before = 1)
-}
-
-cases_year |>
-  distinct(year) |>
-  pull(year) |>
-  map_dfr(get_max_month) |>
-  mutate(
-    measles_month = month.name[measles_month],
-    rubella_month = month.name[rubella_month]
-  ) |>
-  gt() |>
-  cols_label(
-    year = md("**Year**"),
-    measles_month = md("**Month**"),
-    measles_cases = md("**Cases**"),
-    rubella_month = md("**Month**"),
-    rubella_cases = md("**Cases**")
-  ) |>
-  tab_header(title = md("Time of Year with Increased Measles and Rubella Cases Over Time")) |>
-  tab_caption(caption = md("Months with the highest number of cases.")) |>
-  tab_style(style = cell_text(weight = "bold"), locations = cells_column_labels()) |>
-  tab_spanner(label = "Measles", columns = c(measles_month, measles_cases)) |>
-  tab_spanner(label = "Rubella", columns = c(rubella_month, rubella_cases)) |>
-  fmt_number(columns = c(3, 5), sep_mark = ",", decimals = 0)
-```
-
-:::
-
-## Column {width=52%}
-
-::: {.callout-note appearance="minimal"}
-**Research Question 2**
+::: {.callout-note appearance="minimal" style="background-color: #F0F8FF; border-left: 6px solid #0093D5;"}
+**Research Question**
 
 Are countries with lower GDP per capita associated with higher numbers of epidemiologically linked measles cases, and does this relationship vary by region?
 :::
@@ -321,14 +154,14 @@ Are countries with lower GDP per capita associated with higher numbers of epidem
 
 ::: {.panel-tabset}
 
-#### GDP vs. cases
+#### GDP vs. Epidemiologically linked cases
 
 ```{r}
 #| label: gdp-vs-cases
 #| warning: false
 #| message: false
-#| fig-height: 8
-#| fig-width: 13
+#| fig-height: 10
+#| fig-width: 18
 
 ggplot(cases_gdp_year,
        aes(x = year, y = measles_epi_linked, color = gdp_per_capita)) +
@@ -336,76 +169,31 @@ ggplot(cases_gdp_year,
   scale_y_log10(labels = scales::comma) +
   scale_x_continuous(breaks = c(2012, 2016, 2020, 2024)) +
   scale_color_gradient(low = "#A6DAF5", high = "#3E3F3A", labels = scales::comma) +
-  facet_wrap(~ region, ncol = 2, scales = "free_y") +
+  facet_wrap(~ region, ncol = 3, scales = "free_y") +
   labs(
     title = "Epidemiologically Linked Measles Cases Over Time by Region",
-    subtitle = "Each point represents a country in a year; color shows GDP per capita",
+    subtitle = "Each point represents a country in a year & color shows GDP per capita",
     x = "Year",
     y = "Epidemiologically linked measles cases (log scale)",
     color = "GDP per capita"
   ) +
-  theme_minimal(base_size = 16)
+  theme_minimal(base_size = 23)
 ```
 
-#### Epi-linked proportions
+::: {.callout-note appearance="minimal"}
 
-```{r}
-#| label: epi-proportion-table
-#| warning: false
-#| message: false
+Africa and South-East Asia show **wide ranges** of epidemiologically linked measles cases and are generally associated with lower GDP countries. The Americas report relatively few linked cases across years, while Europe shows varying outbreak levels with little clear GDP relationship. In contrast, the Eastern Mediterranean and Western Pacific regions display a stronger trend where **lower GDP countries** tend to experience **higher measles case counts**.
 
-# function to get proportion of epidemiologically-linked cases for each year in one region
-epi_proportions <- function(region_code) {
-  cases_month |>
-    filter(.data$region == region_code) |>
-    group_by(year) |>
-    summarise(
-      measles_epi_linked = sum(measles_epi_linked, na.rm = TRUE),
-      measles_lab_confirmed = sum(measles_lab_confirmed, na.rm = TRUE),
-      .groups = "drop"
-    ) |>
-    mutate(
-      prop_epi_measles = measles_epi_linked / 
-        (measles_epi_linked + measles_lab_confirmed)
-    ) |>
-    select(year, prop_epi_measles)
-}
+:::
 
-cases_month |>
-  distinct(region) |>
-  mutate(
-    region_name = recode(region,
-      "AFR" = "Africa",
-      "AMR" = "Americas",
-      "EMR" = "Eastern Mediterranean",
-      "EUR" = "Europe",
-      "SEAR" = "South-East Asia",
-      "WPR" = "Western Pacific"
-    )
-  ) |>
-  mutate(epi_props = map(region, epi_proportions)) |>
-  unnest(epi_props) |>
-  select(region_name, year, prop_epi_measles) |>
-  group_by(region_name) |>
-  gt() |>
-  fmt_percent(columns = matches("prop"), decimals = 1) |>
-  tab_style(style = cell_text(weight = "bold"), locations = cells_row_groups()) |>
-  cols_label(
-    region_name = md("**Region**"),
-    year = md("**Year**"),
-    prop_epi_measles = md("**Epidemiologically-linked measles cases**")
-  ) |>
-  tab_header(title = md("Proportion of Confirmed Cases that are Epidemiologically-linked")) |>
-  tab_caption(caption = md("Changes in each region's confirmed measles cases makeup over time."))
-```
-
-
-#### GDP groups
+#### GDP per capita levels
 
 ```{r}
 #| label: gdp-group-table
 #| warning: false
 #| message: false
+#| fig-width: 16
+#| fig-height: 16
 
 cases_gdp_year_global <- cases_gdp_year |>
   mutate(
@@ -418,114 +206,333 @@ cases_gdp_year_global <- cases_gdp_year |>
     gdp_group = factor(gdp_group, levels = c("Low GDP", "Medium GDP", "High GDP"))
   )
 
-gdp_epi_groups <- function(region_name) {
-  cases_gdp_year_global |>
-    filter(.data$region == region_name) |>
-    group_by(gdp_group) |>
-    summarise(epi_linked_cases = sum(measles_epi_linked, na.rm = TRUE), .groups = "drop")
-}
-
-cases_gdp_year |>
-  distinct(region) |>
-  mutate(gdp_epi = map(region, gdp_epi_groups)) |>
-  unnest(gdp_epi) |>
-  complete(region, gdp_group, fill = list(epi_linked_cases = 0)) |>
+gdp_incidence_table <- cases_gdp_year_global |>
+  group_by(region, gdp_group) |>
+  summarise(
+    median_incidence_rate = median(
+      measles_incidence_rate_per_1000000_total_population,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) |>
+  complete(
+    region,
+    gdp_group,
+    fill = list(median_incidence_rate = 0)
+  ) |>
   group_by(region) |>
+  mutate(
+    region_rank = percent_rank(median_incidence_rate)
+  ) |>
+  ungroup() |>
+  select(region, gdp_group, median_incidence_rate) |>
+  pivot_wider(
+    names_from = gdp_group,
+    values_from = median_incidence_rate
+  )
+
+gdp_incidence_table |>
   gt() |>
-  fmt_number(columns = epi_linked_cases, decimals = 0) |>
-  tab_style(style = cell_text(weight = "bold"), locations = cells_row_groups()) |>
+  fmt_number(
+    columns = c(`Low GDP`, `Medium GDP`, `High GDP`),
+    decimals = 2
+  ) |>
+  data_color(
+    columns = c(`Low GDP`, `Medium GDP`, `High GDP`),
+    direction = "column",
+    palette = c("#F8F5F0", "#C8BBA3", "#7A6F63")
+  ) |>
   cols_label(
     region = md("**Region**"),
-    gdp_group = md("**GDP Level**"),
-    epi_linked_cases = md("**Epidemiologically-linked measles cases**")
-  ) |>
-  tab_header(title = md("Epidemiologically-linked Measles Cases by Regional GDP Level")) |>
-  tab_caption(caption = md("Total epidemiologically-linked measles cases grouped by global GDP per capita level."))
-```
-
-#### Regional distributions
-
-```{r}
-#| label: regional-distributions
-#| warning: false
-#| message: false
-#| fig-height: 8
-#| fig-width: 13
-
-epi_region_plot <- cases_gdp_year |>
-  ggplot(aes(x = log1p(measles_epi_linked), y = region, fill = after_stat(x))) +
-  geom_density_ridges_gradient(scale = 2, rel_min_height = 0.01) +
-  scale_x_continuous(
-    breaks = log1p(c(0, 10, 100, 1000, 10000)),
-    labels = scales::comma(c(0, 10, 100, 1000, 10000))
-  ) +
-  scale_fill_gradient(low = "#F8F5F0", high = "#325D88") +
-  scale_y_discrete(expand = c(0.0001, 0.5)) +
-  labs(x = "Epidemiologically linked measles cases (log scale)", y = "", fill = "Cases") +
-  theme_minimal(base_size = 16) +
-  theme(panel.grid.minor.x = element_blank(), legend.position = "none")
-
-gdp_region <- cases_gdp_year |>
-  ggplot(aes(x = gdp_per_capita, y = region, fill = after_stat(x))) +
-  geom_density_ridges_gradient(scale = 2, rel_min_height = 0.01) +
-  scale_x_log10(labels = scales::label_comma()) +
-  scale_fill_gradient(low = "#A6DAF5", high = "#3E3F3A") +
-  scale_y_discrete(expand = c(0.0001, 0.5)) +
-  labs(x = "GDP per capita (log scale)", y = "", fill = "GDP per capita") +
-  theme_minimal(base_size = 16) +
-  theme(panel.grid.minor.x = element_blank(), legend.position = "none")
-
-epi_region_plot + gdp_region +
-  plot_layout(ncol = 2) +
-  plot_annotation(
-    title = "Distributions of Measles Cases and GDP per Capita by Region",
-    subtitle = "Yearly country distributions from 2012-2024"
-  )
-```
-
-#### Model results
-
-```{r}
-#| label: model-results
-#| warning: false
-#| message: false
-
-epi_gdp_model_data <- cases_gdp |>
-  distinct(country, year, region_year, gdp_per_capita, measles_epi_linked_year) |>
-  rename(region = region_year) |>
-  filter(year != 2025, gdp_per_capita > 0) |>
-  drop_na(gdp_per_capita, measles_epi_linked_year, region) |>
-  mutate(
-    region = factor(region),
-    log_gdp = log10(gdp_per_capita),
-    log_epi_linked = log1p(measles_epi_linked_year)
-  )
-
-epi_gdp_model <- lm(log_epi_linked ~ log_gdp * region, data = epi_gdp_model_data)
-
-coef_table <- as.data.frame(summary(epi_gdp_model)$coefficients) |>
-  rownames_to_column(var = "term")
-
-coef_table |>
-  gt() |>
-  fmt_number(columns = c(Estimate, `Std. Error`, `t value`, `Pr(>|t|)`), decimals = 3) |>
-  sub_small_vals(columns = `Pr(>|t|)`, threshold = 0.001) |>
-  cols_align(align = "center") |>
-  cols_label(
-    term = "Model Term",
-    Estimate = "Estimate",
-    `Std. Error` = "Standard Error",
-    `t value` = "t Statistic",
-    `Pr(>|t|)` = "p-value"
+    `Low GDP` = md("**Low GDP**"),
+    `Medium GDP` = md("**Medium GDP**"),
+    `High GDP` = md("**High GDP**")
   ) |>
   tab_header(
-    title = "Model Results: GDP, Region, and Epidemiologically Linked Measles Cases",
-    subtitle = "Log-log linear regression model with GDP by region interaction"
+    title = md("Measles Incidence Rates by Regional GDP Level")
   ) |>
   tab_caption(
-    caption = "Relationship between GDP per capita and epidemiologically linked measles cases using yearly country observations from 2012-2024."
+    caption = md("Median incidence rates per 1,000,000 population, grouped by global GDP per capita level.")
   ) |>
-  tab_style(style = cell_text(weight = "bold"), locations = cells_column_labels())
+  tab_options(
+  table.width = pct(55),
+  table.font.size = px(16),
+  data_row.padding = px(12),
+  heading.padding = px(12) 
+  ) |>
+  cols_align(
+    align = "center",
+    columns = c(`Low GDP`, `Medium GDP`, `High GDP`)
+)
 ```
 
+::: {.callout-note appearance="minimal"}
+
+Median measles incidence rates vary across regions and GDP levels. **Africa and Europe show higher incidence rates among lower GDP countries**, and the Americas have very low incidence across all GDP groups. **South-East Asia and the Western Pacific**, show the **highest** incidence rates among **medium GDP** countries rather than low GDP countries.
+
 :::
+
+#### Countries with High GDP and Measles Cases
+
+```{r}
+#| label: high gdp/measles map
+#| warning: false
+#| message: false
+
+top_measles <- cases_gdp_year |>
+  group_by(year) |>
+  slice_min(n=20,
+            order_by = measles_incidence_rate_per_1000000_total_population) |>
+  mutate(type = "cases")
+
+ cases_gdp_year |>
+  group_by(year) |>
+  slice_max(n=20, order_by = gdp_per_capita) |>
+  mutate(type = "gdp") |>
+  bind_rows(top_measles) |>
+  filter(year == 2024) |>
+  group_by(country, Longitude, Latitude) |>
+  summarise(both = n() == 2,
+            type = if_else(both, "both", first(type)),
+            gdp = first(gdp_per_capita),
+            measles_cases = first(measles_incidence_rate_per_1000000_total_population),
+            .groups = "drop") |>
+  mutate(circle_label = 
+           glue::glue(
+             "{country}<br>
+             GDP per capita: {scales::comma(gdp)}<br>
+             Measles incidence rate: {measles_cases}")) |>
+  leaflet() |>
+  addTiles() |>
+  addCircleMarkers(
+    lng = ~Longitude,
+    lat = ~Latitude,
+    label = ~lapply(circle_label, htmltools::HTML),
+    color = ~case_when(
+      type == "both" ~ "#8B3A3A",
+      type == "gdp" ~ "#325D88",
+      type == "cases" ~ "#968777"
+    ),
+    radius = 6,
+    stroke = TRUE,
+    fillOpacity = 1
+    # clusterOptions = markerClusterOptions
+  ) |>
+  addLegend(
+    position = "bottomleft",
+    colors = c("#325D88", "#968777", "#8B3A3A"),
+    labels = c("Highest GDP per capita", 
+               "Lowest Measles Cases per 1000000 population",
+               "Both in highest GDP per capita and lowest cases per 1,000,000 people"),
+    title = "Top Countries (2024)"
+  )
+```
+
+::: {.callout-note appearance="minimal"}
+
+Displayed above are the 20 countries with highest GDP per capita in 2024 and the 20 countries with the lowest number of measles cases per 1,000,000 people in it's population in 2024. There is a notable amount of overlap with **twelve countries belonging to both groups**. Most countries in these groups belong to **Europe**.
+
+:::
+
+:::
+
+# Measles in Ethiopia
+
+::: {.callout-note appearance="minimal" style="background-color: #F0F8FF; border-left: 6px solid #0093D5;"}
+
+*Why Ethiopia?* Ethiopia was selected because it showed the **largest** increase (about 25,000 more yearly cases) in epidemiologically linked measles cases from 2012 to 2024. Ethiopia’s measles incidence rate **increased** by about 181 cases per 1,000,000 people over the study period, which was one of the highest in Africa. This case study focuses on Ethiopia’s outbreak pattern over time and uses average temperature as additional information for exploring possible environmental patterns.
+
+:::
+##
+
+::: {.panel-tabset}
+
+#### Epidemiologically linked case increase 
+
+```{r}
+#| label: ethiopia-outlier
+#| warning: false
+#| message: false
+#| fig-width: 19
+#| fig-height: 10
+
+outlier_country <- "Ethiopia"
+
+plot_data <- cases_gdp_year |>
+  filter(region == "Africa")
+
+highlight_data <- plot_data |>
+  filter(country == outlier_country)
+
+ggplot(
+  plot_data,
+  aes(x = year, y = measles_epi_linked, color = gdp_per_capita)
+) +
+  geom_jitter(
+    alpha = 0.45,
+    size = 2.2,
+    width = 0.25,
+    height = 0.05
+  ) +
+
+  geom_point(
+    data = highlight_data,
+    aes(x = year, y = measles_epi_linked),
+    inherit.aes = FALSE,
+    color = "#968777",
+    fill = "#968777",
+    size = 4,
+    shape = 21,
+    stroke = 1.2
+  ) +
+
+  geom_text(
+    data = highlight_data,
+    aes(
+      x = year,
+      y = measles_epi_linked,
+      label = year
+    ),
+    inherit.aes = FALSE,
+    color = "#968777",
+    fontface = "bold",
+    size = 3.5,
+    nudge_y = 2000,
+    check_overlap = TRUE
+  ) +
+
+  scale_y_log10(
+    limits = c(1, 100000),
+    labels = scales::comma
+  ) +
+
+  scale_x_continuous(
+    breaks = c(2012, 2016, 2020, 2024)
+  ) +
+
+  scale_color_gradient(
+    low = "#A6DAF5",
+    high = "#3E3F3A",
+    labels = scales::comma
+  ) +
+
+  labs(
+    title = "Ethiopia: A Measles Outlier in Africa",
+    subtitle = "Ethiopia shows one of the largest increases in epidemiologically linked measles cases over time",
+    x = "Year",
+    y = "Epidemiologically linked measles cases (log scale)",
+    color = "GDP per capita"
+  ) +
+
+  theme_minimal(base_size = 25) +
+
+  theme(
+    plot.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+```
+
+::: {.callout-note appearance="minimal"}
+
+Ethiopia shows an **increase** in epidemiologically linked measles cases over time from 2012 to 2024. Interestingly, from 2012 to 2015 cases were rising, but there is a big decrease from 2016 to 2021 before a drastic increase by 2024.
+
+:::
+
+```{r}
+#| include: false
+cases_gdp_year |>
+  group_by(country) |>
+  summarize(
+    first_cases = first(measles_epi_linked),
+    last_cases = last(measles_epi_linked),
+    change_cases = last_cases - first_cases,
+    .groups = "drop"
+  ) |>
+  arrange(desc(change_cases)) |>
+  slice_head(n = 15)
+```
+
+```{r}
+#| include: false
+cases_gdp_year |>
+  arrange(country, year) |>
+  group_by(country, region) |>
+  summarise(
+    first_year = first(year),
+    last_year = last(year),
+    first_incidence = first(measles_incidence_rate_per_1000000_total_population),
+    last_incidence = last(measles_incidence_rate_per_1000000_total_population),
+    incidence_change = last_incidence - first_incidence,
+    .groups = "drop"
+  ) |>
+  arrange(desc(incidence_change)) |>
+  slice_head(n = 15)
+```
+
+
+
+#### Temperature vs. Epi-linked cases
+
+```{r}
+#| label: ethiopia-temp-cases-bars
+#| warning: false
+#| message: false
+#| fig-width: 8
+#| fig-height: 8
+
+library(plotly)
+
+ethiopia_temp <- readr::read_csv("ethiopia_temp.csv") |>
+  clean_names() |>
+  rename(
+    year = 1,
+    avg_temp_c = 2
+  ) |>
+  mutate(year = as.numeric(year))
+
+ethiopia_cases <- cases_gdp_year |>
+  filter(country == "Ethiopia", year >= 2012, year <= 2024) |>
+  select(year, measles_epi_linked)
+
+ethiopia_plot_data <- ethiopia_cases |>
+  left_join(ethiopia_temp, by = "year") |>
+  filter(!is.na(avg_temp_c))
+
+plot_ly(
+  ethiopia_plot_data,
+  x = ~year,
+  y = ~measles_epi_linked,
+  type = "bar",
+  marker = list(
+    color = ~avg_temp_c,
+    colorscale = list(
+      c(0, "#A6DAF5"),
+      c(0.5, "#F4D06F"),
+      c(1, "#8B3A3A")
+    ),
+    colorbar = list(title = "Avg temp °C")
+  ),
+  hovertemplate = paste(
+    "<b>Ethiopia</b><br>",
+    "Year: %{x}<br>",
+    "Epi-linked measles cases: %{y:,}<br>",
+    "Avg temperature: %{marker.color:.2f}°C",
+    "<extra></extra>"
+  )
+) |>
+  layout(
+    title = "Ethiopia: Measles Cases and Temperature by Year",
+    xaxis = list(title = "Year", dtick = 1),
+    yaxis = list(title = "Epidemiologically linked measles cases")
+  )
+```
+
+::: {.callout-note appearance="minimal"}
+
+Ethiopia’s epidemiologically linked measles cases were high in 2014 and 2015, and increased sharply after 2021, reaching the highest level in 2024. The temperature coloring shows that **warmer** years tend to align with the outbreak pattern, thus **rising measles counts** tend to have much warmer yearly temperature conditions.
+
+:::
+
+:::
+
+
