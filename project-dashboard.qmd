@@ -160,24 +160,30 @@ Are countries with lower GDP per capita associated with higher numbers of epidem
 #| label: gdp-vs-cases
 #| warning: false
 #| message: false
-#| fig-height: 10
-#| fig-width: 18
+#| fig-height: 12
+#| fig-width: 22
 
 ggplot(cases_gdp_year,
        aes(x = year, y = measles_epi_linked, color = gdp_per_capita)) +
-  geom_jitter(alpha = 0.9, size = 2.5, width = 0.25, height = 0.1) +
+  geom_jitter(alpha = 0.9, size = 4, width = 0.25, height = 0.1) +
   scale_y_log10(labels = scales::comma) +
   scale_x_continuous(breaks = c(2012, 2016, 2020, 2024)) +
   scale_color_gradient(low = "#A6DAF5", high = "#3E3F3A", labels = scales::comma) +
   facet_wrap(~ region, ncol = 3, scales = "free_y") +
   labs(
     title = "Epidemiologically Linked Measles Cases Over Time by Region",
-    subtitle = "Each point represents a country in a year & color shows GDP per capita",
+    subtitle = "Each point represents a country in a year, color shows GDP per capita, 
+    and case counts shown on a log scale",
     x = "Year",
-    y = "Epidemiologically linked measles cases (log scale)",
+    y = "# of Cases",
     color = "GDP per capita"
   ) +
-  theme_minimal(base_size = 23)
+  theme_minimal(base_size = 30) +
+  theme(
+    strip.text = element_text(face = "bold"),
+    panel.spacing = unit(1.2, "lines"),
+    plot.margin = margin(4, 4, 4, 4)
+  )
 ```
 
 ::: {.callout-note appearance="minimal"}
@@ -370,7 +376,7 @@ ggplot(
 ) +
   geom_jitter(
     alpha = 0.45,
-    size = 2.2,
+    size = 4.5,
     width = 0.25,
     height = 0.05
   ) +
@@ -381,24 +387,9 @@ ggplot(
     inherit.aes = FALSE,
     color = "#968777",
     fill = "#968777",
-    size = 4,
+    size = 8,
     shape = 21,
     stroke = 1.2
-  ) +
-
-  geom_text(
-    data = highlight_data,
-    aes(
-      x = year,
-      y = measles_epi_linked,
-      label = year
-    ),
-    inherit.aes = FALSE,
-    color = "#968777",
-    fontface = "bold",
-    size = 3.5,
-    nudge_y = 2000,
-    check_overlap = TRUE
   ) +
 
   scale_y_log10(
@@ -417,14 +408,14 @@ ggplot(
   ) +
 
   labs(
-    title = "Ethiopia: A Measles Outlier in Africa",
-    subtitle = "Ethiopia shows one of the largest increases in epidemiologically linked measles cases over time",
+    title = "Ethiopia's Notable Increase in Measles Cases Over Time",
+    subtitle = "Ethiopia has one of the largest country's increase in epidemiologically linked measles cases over time.\nCase counts shown on a log scale",
     x = "Year",
-    y = "Epidemiologically linked measles cases (log scale)",
+    y = "# of Cases",
     color = "GDP per capita"
   ) +
 
-  theme_minimal(base_size = 25) +
+  theme_minimal(base_size = 27) +
 
   theme(
     plot.title = element_text(face = "bold"),
@@ -521,9 +512,9 @@ plot_ly(
   )
 ) |>
   layout(
-    title = "Ethiopia: Measles Cases and Temperature by Year",
+    title = "Ethiopia's Epidemiologically Linked Measles Cases and Temperature Over Time",
     xaxis = list(title = "Year", dtick = 1),
-    yaxis = list(title = "Epidemiologically linked measles cases")
+    yaxis = list(title = "# of Cases")
   )
 ```
 
