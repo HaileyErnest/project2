@@ -15,12 +15,14 @@ format:
         icon: linkedin
         href: https://www.linkedin.com/in/hailey-ernest/ 
         aria-label: LinkedIn
+server: shiny
 embed-resources: true
 ---
 
 ```{r}
 #| label: load-packages
 #| include: false
+#| context: setup
 
 library(tidyverse)
 library(here)
@@ -48,6 +50,7 @@ library(plotly)
 ```{r}
 #| label: load-data
 #| include: false
+#| context: setup
 
 cases_month <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2025/2025-06-24/cases_month.csv') |>
   clean_names()
@@ -70,6 +73,7 @@ lat_lon <- read_csv(here::here("world-data-2023.csv")) |>
 ```{r}
 #| label: prep-gdp-data
 #| include: false
+#| context: setup
 
 clean_country <- function(x) {
   x |>
@@ -142,6 +146,7 @@ cases_gdp_year <- cases_year |>
   )|>
   left_join(lat_lon, by = join_by("country" == "Country"))
 ```
+
 # Measles by GDP Worldwide
 
 ::: {.callout-note appearance="minimal" style="background-color: #F0F8FF; border-left: 6px solid #0093D5;"}
@@ -152,44 +157,91 @@ Are countries with lower GDP per capita associated with higher numbers of epidem
 
 ### Research Question 2: Measles Association with GDP per Capita
 
-::: {.panel-tabset}
+:::::: panel-tabset
 
-#### GDP vs. Epidemiologically linked cases
+#### Countries with High GDP and Measles Cases
+
+::: {.sidebar}
+```{r}
+selectInput(
+  inputId = "gdp_year",
+  label = "Select year",
+  choices = 2013:2024,
+  selected = 2024
+)
+```
+:::
+
+###
 
 ```{r}
-#| label: gdp-vs-cases
+leafletOutput("map")
+```
+
+```{r}
+#| label: high gdp/measles map
 #| warning: false
 #| message: false
-#| fig-height: 12
-#| fig-width: 22
+#| context: server
 
-ggplot(cases_gdp_year,
-       aes(x = year, y = measles_epi_linked, color = gdp_per_capita)) +
-  geom_jitter(alpha = 0.9, size = 4, width = 0.25, height = 0.1) +
-  scale_y_log10(labels = scales::comma) +
-  scale_x_continuous(breaks = c(2012, 2016, 2020, 2024)) +
-  scale_color_gradient(low = "#A6DAF5", high = "#3E3F3A", labels = scales::comma) +
-  facet_wrap(~ region, ncol = 3, scales = "free_y") +
-  labs(
-    title = "Epidemiologically Linked Measles Cases Over Time by Region",
-    subtitle = "Each point represents a country in a year, color shows GDP per capita, 
-    and case counts shown on a log scale",
-    x = "Year",
-    y = "# of Cases",
-    color = "GDP per capita"
-  ) +
-  theme_minimal(base_size = 30) +
-  theme(
-    strip.text = element_text(face = "bold"),
-    panel.spacing = unit(1.2, "lines"),
-    plot.margin = margin(4, 4, 4, 4)
+top_measles <- cases_gdp_year |>
+  group_by(year) |>
+  slice_min(n=20,
+            order_by = measles_incidence_rate_per_1000000_total_population) |>
+  mutate(type = "cases")
+
+ output$map <- renderLeaflet({
+    cases_gdp_year |>
+  group_by(year) |>
+  slice_max(n=20, order_by = gdp_per_capita) |>
+  mutate(type = "gdp") |>
+  bind_rows(top_measles) |>
+  filter(year == input$gdp_year) |>
+  group_by(country, Longitude, Latitude) |>
+  summarise(both = n() == 2,
+            type = if_else(both, "both", first(type)),
+            gdp = first(gdp_per_capita),
+            measles_cases = first(measles_incidence_rate_per_1000000_total_population),
+            .groups = "drop") |>
+  mutate(circle_label = 
+           glue::glue(
+             "{country}<br>
+             GDP per capita: {scales::comma(gdp)}<br>
+             Measles incidence rate: {measles_cases}")) |>
+  leaflet() |>
+  addTiles(
+    options = tileOptions(noWrap = TRUE
+                          # minZoom = 2.1,
+                          )
+        ) |>
+  addCircleMarkers(
+    lng = ~Longitude,
+    lat = ~Latitude,
+    label = ~lapply(circle_label, htmltools::HTML),
+    color = ~case_when(
+      type == "both" ~ "#8B3A3A",
+      type == "gdp" ~ "#325D88",
+      type == "cases" ~ "#968777"
+    ),
+    radius = 6,
+    stroke = TRUE,
+    fillOpacity = 1
+    # clusterOptions = markerClusterOptions
+  ) |>
+  addLegend(
+    position = "bottomleft",
+    colors = c("#325D88", "#968777", "#8B3A3A"),
+    labels = c("Highest GDP per capita", 
+               "Lowest Measles Cases per 1000000 population",
+               "Both in highest GDP per capita and lowest cases per 1,000,000 people"),
+    title = "Top Countries (2024)"
   )
+   })
+
 ```
 
 ::: {.callout-note appearance="minimal"}
-
-Africa and South-East Asia show **wide ranges** of epidemiologically linked measles cases and are generally associated with lower GDP countries. The Americas report relatively few linked cases across years, while Europe shows varying outbreak levels with little clear GDP relationship. In contrast, the Eastern Mediterranean and Western Pacific regions display a stronger trend where **lower GDP countries** tend to experience **higher measles case counts**.
-
+Displayed above are the 20 countries with highest GDP per capita in 2024 and the 20 countries with the lowest number of measles cases per 1,000,000 people in it's population in 2024. There is a notable amount of overlap with **twelve countries belonging to both groups**. Most countries in these groups belong to **Europe**.
 :::
 
 #### GDP per capita levels
@@ -203,13 +255,21 @@ Africa and South-East Asia show **wide ranges** of epidemiologically linked meas
 
 cases_gdp_year_global <- cases_gdp_year |>
   mutate(
-    gdp_group = ntile(gdp_per_capita, 3),
-    gdp_group = recode(as.character(gdp_group),
-      "1" = "Low GDP",
-      "2" = "Medium GDP",
-      "3" = "High GDP"
+    gdp_group = case_when(
+      gdp_per_capita <= 1145 ~ "Low-Income Economies",
+      gdp_per_capita <= 4515 ~ "Lower-Middle-Income Economies",
+      gdp_per_capita <= 14005 ~ "Upper-Middle-Income Economies",
+      TRUE ~ "High-Income Economies"
     ),
-    gdp_group = factor(gdp_group, levels = c("Low GDP", "Medium GDP", "High GDP"))
+    gdp_group = factor(
+      gdp_group,
+      levels = c(
+        "Low-Income Economies",
+        "Lower-Middle-Income Economies",
+        "Upper-Middle-Income Economies",
+        "High-Income Economies"
+      )
+    )
   )
 
 gdp_incidence_table <- cases_gdp_year_global |>
@@ -240,25 +300,36 @@ gdp_incidence_table <- cases_gdp_year_global |>
 gdp_incidence_table |>
   gt() |>
   fmt_number(
-    columns = c(`Low GDP`, `Medium GDP`, `High GDP`),
+    columns = c(
+      `Low-Income Economies`,
+      `Lower-Middle-Income Economies`,
+      `Upper-Middle-Income Economies`,
+      `High-Income Economies`
+    ),
     decimals = 2
   ) |>
   data_color(
-    columns = c(`Low GDP`, `Medium GDP`, `High GDP`),
+    columns = c(
+      `Low-Income Economies`,
+      `Lower-Middle-Income Economies`,
+      `Upper-Middle-Income Economies`,
+      `High-Income Economies`
+    ),
     direction = "column",
     palette = c("#F8F5F0", "#C8BBA3", "#7A6F63")
   ) |>
   cols_label(
     region = md("**Region**"),
-    `Low GDP` = md("**Low GDP**"),
-    `Medium GDP` = md("**Medium GDP**"),
-    `High GDP` = md("**High GDP**")
+    `Low-Income Economies` = md("**Low-Income Economies**"),
+    `Lower-Middle-Income Economies` = md("**Lower-Middle-Income Economies**"),
+    `Upper-Middle-Income Economies` = md("**Upper-Middle-Income Economies**"),
+    `High-Income Economies` = md("**High-Income Economies**")
   ) |>
   tab_header(
     title = md("Measles Incidence Rates by Regional GDP Level")
   ) |>
   tab_caption(
-    caption = md("Median incidence rates per 1,000,000 population, grouped by global GDP per capita level.")
+    caption = md("Median incidence rates per 1,000,000 population grouped using World Bank income classifications.")
   ) |>
   tab_options(
   table.width = pct(55),
@@ -268,92 +339,68 @@ gdp_incidence_table |>
   ) |>
   cols_align(
     align = "center",
-    columns = c(`Low GDP`, `Medium GDP`, `High GDP`)
-)
-```
-
-::: {.callout-note appearance="minimal"}
-
-Median measles incidence rates vary across regions and GDP levels. **Africa and Europe show higher incidence rates among lower GDP countries**, and the Americas have very low incidence across all GDP groups. **South-East Asia and the Western Pacific**, show the **highest** incidence rates among **medium GDP** countries rather than low GDP countries.
-
-:::
-
-#### Countries with High GDP and Measles Cases
-
-```{r}
-#| label: high gdp/measles map
-#| warning: false
-#| message: false
-
-top_measles <- cases_gdp_year |>
-  group_by(year) |>
-  slice_min(n=20,
-            order_by = measles_incidence_rate_per_1000000_total_population) |>
-  mutate(type = "cases")
-
- cases_gdp_year |>
-  group_by(year) |>
-  slice_max(n=20, order_by = gdp_per_capita) |>
-  mutate(type = "gdp") |>
-  bind_rows(top_measles) |>
-  filter(year == 2024) |>
-  group_by(country, Longitude, Latitude) |>
-  summarise(both = n() == 2,
-            type = if_else(both, "both", first(type)),
-            gdp = first(gdp_per_capita),
-            measles_cases = first(measles_incidence_rate_per_1000000_total_population),
-            .groups = "drop") |>
-  mutate(circle_label = 
-           glue::glue(
-             "{country}<br>
-             GDP per capita: {scales::comma(gdp)}<br>
-             Measles incidence rate: {measles_cases}")) |>
-  leaflet() |>
-  addTiles() |>
-  addCircleMarkers(
-    lng = ~Longitude,
-    lat = ~Latitude,
-    label = ~lapply(circle_label, htmltools::HTML),
-    color = ~case_when(
-      type == "both" ~ "#8B3A3A",
-      type == "gdp" ~ "#325D88",
-      type == "cases" ~ "#968777"
-    ),
-    radius = 6,
-    stroke = TRUE,
-    fillOpacity = 1
-    # clusterOptions = markerClusterOptions
-  ) |>
-  addLegend(
-    position = "bottomleft",
-    colors = c("#325D88", "#968777", "#8B3A3A"),
-    labels = c("Highest GDP per capita", 
-               "Lowest Measles Cases per 1000000 population",
-               "Both in highest GDP per capita and lowest cases per 1,000,000 people"),
-    title = "Top Countries (2024)"
+    columns = c(
+      `Low-Income Economies`,
+      `Lower-Middle-Income Economies`,
+      `Upper-Middle-Income Economies`,
+      `High-Income Economies`
+    )
   )
 ```
 
 ::: {.callout-note appearance="minimal"}
-
-Displayed above are the 20 countries with highest GDP per capita in 2024 and the 20 countries with the lowest number of measles cases per 1,000,000 people in it's population in 2024. There is a notable amount of overlap with **twelve countries belonging to both groups**. Most countries in these groups belong to **Europe**.
-
+Median measles incidence rates vary across regions and GDP levels. **Africa and Europe show higher incidence rates among lower GDP countries**, and the Americas have very low incidence across all GDP groups. **South-East Asia and the Western Pacific**, show the **highest** incidence rates among **medium GDP** countries rather than low GDP countries.
 :::
 
+#### GDP vs. Epidemiologically linked cases
+
+```{r}
+#| label: gdp-vs-cases
+#| warning: false
+#| message: false
+#| fig-height: 12
+#| fig-width: 22
+
+ggplot(cases_gdp_year,
+       aes(x = year, y = measles_epi_linked, color = gdp_per_capita)) +
+  geom_jitter(alpha = 0.9, size = 4, width = 0.25, height = 0.1) +
+  scale_y_log10(labels = scales::comma) +
+  scale_x_continuous(breaks = c(2012, 2016, 2020, 2024)) +
+  scale_color_gradient(low = "#A6DAF5", high = "#3E3F3A", labels = scales::comma) +
+  facet_wrap(~ region, ncol = 3, scales = "free_y") +
+  labs(
+    title = "Epidemiologically Linked Measles Cases Over Time by Region",
+    subtitle = "Each point represents a country in a year, color shows GDP per capita, 
+    and case counts shown on a log scale",
+    x = "Year",
+    y = NULL,
+    color = "GDP per capita"
+  ) +
+  theme_minimal(base_size = 30) +
+  theme(
+    strip.text = element_text(face = "bold"),
+    panel.spacing = unit(1.2, "lines"),
+    plot.margin = margin(4, 4, 4, 4)
+  )
+```
+
+::: {.callout-note appearance="minimal"}
+Africa and South-East Asia show **wide ranges** of epidemiologically linked measles cases and are generally associated with lower GDP countries. The Americas report relatively few linked cases across years, while Europe shows varying outbreak levels with little clear GDP relationship. In contrast, the Eastern Mediterranean and Western Pacific regions display a stronger trend where **lower GDP countries** tend to experience **higher measles case counts**.
 :::
+::::::
 
 # Measles in Ethiopia
 
 ::: {.callout-note appearance="minimal" style="background-color: #F0F8FF; border-left: 6px solid #0093D5;"}
-
 *Why Ethiopia?* Ethiopia was selected because it showed the **largest** increase (about 25,000 more yearly cases) in epidemiologically linked measles cases from 2012 to 2024. Ethiopia’s measles incidence rate **increased** by about 181 cases per 1,000,000 people over the study period, which was one of the highest in Africa. This case study focuses on Ethiopia’s outbreak pattern over time and uses average temperature as additional information for exploring possible environmental patterns.
 
+Data on Ethiopia’s yearly temperature was obtained through the [World Bank Group’s Climate Change Knowledge Portal](https://climateknowledgeportal.worldbank.org/country/ethiopia/climate-data-historical). The [data](https://crudata.uea.ac.uk/cru/data/hrg/) was collected by the Climatic Research Unit of University of East Anglia from ground-based weather station observations and can be accessed.
 :::
-##
 
-::: {.panel-tabset}
+## 
 
-#### Epidemiologically linked case increase 
+::::: panel-tabset
+#### Epidemiologically linked case increase
 
 ```{r}
 #| label: ethiopia-outlier
@@ -411,8 +458,8 @@ ggplot(
     title = "Ethiopia's Notable Increase in Measles Cases Over Time",
     subtitle = "Ethiopia has one of the largest country's increase in epidemiologically linked measles cases over time.\nCase counts shown on a log scale",
     x = "Year",
-    y = "# of Cases",
-    color = "GDP per capita"
+    y = NULL,
+    color = "GDP per capita ($)"
   ) +
 
   theme_minimal(base_size = 27) +
@@ -424,9 +471,7 @@ ggplot(
 ```
 
 ::: {.callout-note appearance="minimal"}
-
 Ethiopia shows an **increase** in epidemiologically linked measles cases over time from 2012 to 2024. Interestingly, from 2012 to 2015 cases were rising, but there is a big decrease from 2016 to 2021 before a drastic increase by 2024.
-
 :::
 
 ```{r}
@@ -459,8 +504,6 @@ cases_gdp_year |>
   arrange(desc(incidence_change)) |>
   slice_head(n = 15)
 ```
-
-
 
 #### Temperature vs. Epi-linked cases
 
@@ -519,11 +562,6 @@ plot_ly(
 ```
 
 ::: {.callout-note appearance="minimal"}
-
 Ethiopia’s epidemiologically linked measles cases were high in 2014 and 2015, and increased sharply after 2021, reaching the highest level in 2024. The temperature coloring shows that **warmer** years tend to align with the outbreak pattern, thus **rising measles counts** tend to have much warmer yearly temperature conditions.
-
 :::
-
-:::
-
-
+:::::
