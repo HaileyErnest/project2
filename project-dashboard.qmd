@@ -45,6 +45,9 @@ library(stringi)
 library(rsconnect)
 library(leaflet)
 library(plotly)
+library(shiny)
+library(DT)
+library(htmltools)
 ```
 
 ```{r}
@@ -161,25 +164,28 @@ Are countries with lower GDP per capita associated with higher numbers of epidem
 
 #### Countries with High GDP and Measles Cases
 
-::: {.sidebar}
 ```{r}
+#| layout: [[20,80]]
+#| layout-valign: top
+
 selectInput(
   inputId = "gdp_year",
-  label = "Select year",
+  label = "Select a year below to view the countries with the highest GDP per capita or lowest measles cases per 1,000,000 people in the population:",
   choices = 2013:2024,
-  selected = 2024
+  selected = 2024,
+  width = "100%"
+)
+
+leafletOutput(
+  "map",
+  height = "480px",
+  width = "100%"
 )
 ```
-:::
 
-###
 
 ```{r}
-leafletOutput("map")
-```
-
-```{r}
-#| label: high gdp/measles map
+#| label: high-gdp-measles-map
 #| warning: false
 #| message: false
 #| context: server
@@ -208,12 +214,26 @@ top_measles <- cases_gdp_year |>
              "{country}<br>
              GDP per capita: {scales::comma(gdp)}<br>
              Measles incidence rate: {measles_cases}")) |>
-  leaflet() |>
-  addTiles(
-    options = tileOptions(noWrap = TRUE
-                          # minZoom = 2.1,
-                          )
-        ) |>
+  leaflet(
+    options = leafletOptions(
+      minZoom = 2,
+      maxBoundsViscosity = 1
+    )
+  ) |>
+    addTiles(
+      options = tileOptions(noWrap = TRUE)
+    ) |>
+    setView(
+      lng = 0,
+      lat = 20,
+      zoom = 2
+    ) |>
+    setMaxBounds(
+      lng1 = -180,
+      lat1 = -60,
+      lng2 = 180,
+      lat2 = 85
+    ) |>
   addCircleMarkers(
     lng = ~Longitude,
     lat = ~Latitude,
@@ -232,7 +252,7 @@ top_measles <- cases_gdp_year |>
     position = "bottomleft",
     colors = c("#325D88", "#968777", "#8B3A3A"),
     labels = c("Highest GDP per capita", 
-               "Lowest Measles Cases per 1000000 population",
+               "Lowest Measles Cases per 1,000,000 population",
                "Both in highest GDP per capita and lowest cases per 1,000,000 people"),
     title = "Top Countries (2024)"
   )
@@ -240,8 +260,8 @@ top_measles <- cases_gdp_year |>
 
 ```
 
-::: {.callout-note appearance="minimal"}
-Displayed above are the 20 countries with highest GDP per capita in 2024 and the 20 countries with the lowest number of measles cases per 1,000,000 people in it's population in 2024. There is a notable amount of overlap with **twelve countries belonging to both groups**. Most countries in these groups belong to **Europe**.
+::: {.callout-note appearance="minimal" style="border-left: 4px solid #325D88;"}
+Displayed above are the 20 countries with highest GDP per capita and the 20 countries with the lowest number of measles cases per 1,000,000 people in it's population for one year. There is a notable amount of overlap in each year. For example, **twelve countries belong to both groups** in 2024. Over time, most countries in these groups belong to **Europe or Africa**.
 :::
 
 #### GDP per capita levels
@@ -255,19 +275,22 @@ Displayed above are the 20 countries with highest GDP per capita in 2024 and the
 
 cases_gdp_year_global <- cases_gdp_year |>
   mutate(
-    gdp_group = case_when(
-      gdp_per_capita <= 1145 ~ "Low-Income Economies",
-      gdp_per_capita <= 4515 ~ "Lower-Middle-Income Economies",
-      gdp_per_capita <= 14005 ~ "Upper-Middle-Income Economies",
-      TRUE ~ "High-Income Economies"
+    gdp_group = ntile(gdp_per_capita, 5),
+    gdp_group = recode(as.character(gdp_group),
+      "1" = "Low GDP",
+      "2" = "Lower-Middle GDP",
+      "3" = "Middle GDP",
+      "4" = "Upper-Middle GDP",
+      "5" = "High GDP"
     ),
     gdp_group = factor(
       gdp_group,
       levels = c(
-        "Low-Income Economies",
-        "Lower-Middle-Income Economies",
-        "Upper-Middle-Income Economies",
-        "High-Income Economies"
+        "Low GDP",
+        "Lower-Middle GDP",
+        "Middle GDP",
+        "Upper-Middle GDP",
+        "High GDP"
       )
     )
   )
@@ -301,55 +324,69 @@ gdp_incidence_table |>
   gt() |>
   fmt_number(
     columns = c(
-      `Low-Income Economies`,
-      `Lower-Middle-Income Economies`,
-      `Upper-Middle-Income Economies`,
-      `High-Income Economies`
+      `Low GDP`,
+      `Lower-Middle GDP`,
+      `Middle GDP`,
+      `Upper-Middle GDP`,
+      `High GDP`
     ),
     decimals = 2
   ) |>
   data_color(
-    columns = c(
-      `Low-Income Economies`,
-      `Lower-Middle-Income Economies`,
-      `Upper-Middle-Income Economies`,
-      `High-Income Economies`
-    ),
-    direction = "column",
+  columns = c(
+    `Low GDP`,
+    `Lower-Middle GDP`,
+    `Middle GDP`,
+    `Upper-Middle GDP`,
+    `High GDP`
+  ),
+    direction = "row",
     palette = c("#F8F5F0", "#C8BBA3", "#7A6F63")
   ) |>
   cols_label(
     region = md("**Region**"),
-    `Low-Income Economies` = md("**Low-Income Economies**"),
-    `Lower-Middle-Income Economies` = md("**Lower-Middle-Income Economies**"),
-    `Upper-Middle-Income Economies` = md("**Upper-Middle-Income Economies**"),
-    `High-Income Economies` = md("**High-Income Economies**")
+    `Low GDP` = md("**Low**"),
+    `Lower-Middle GDP` = md("**Lower-Middle**"),
+    `Middle GDP` = md("**Middle**"),
+    `Upper-Middle GDP` = md("**Upper-Middle**"),
+    `High GDP` = md("**High**")
+  ) |>
+  tab_spanner(
+    label = md("**GDP Group**"),
+    columns = c(
+      `Low GDP`,
+      `Lower-Middle GDP`,
+      `Middle GDP`,
+      `Upper-Middle GDP`,
+      `High GDP`
+    )
   ) |>
   tab_header(
     title = md("Measles Incidence Rates by Regional GDP Level")
   ) |>
   tab_caption(
-    caption = md("Median incidence rates per 1,000,000 population grouped using World Bank income classifications.")
+    caption = md("Median incidence rates per 1,000,000 population grouped by GDP per capita quintiles, with each GDP group representing approximately 20% of observations. Table colors compare values within each region.")
   ) |>
   tab_options(
-  table.width = pct(55),
-  table.font.size = px(16),
-  data_row.padding = px(12),
-  heading.padding = px(12) 
+    table.width = pct(55),
+    table.font.size = px(16),
+    data_row.padding = px(12),
+    heading.padding = px(12) 
   ) |>
   cols_align(
     align = "center",
     columns = c(
-      `Low-Income Economies`,
-      `Lower-Middle-Income Economies`,
-      `Upper-Middle-Income Economies`,
-      `High-Income Economies`
+      `Low GDP`,
+      `Lower-Middle GDP`,
+      `Middle GDP`,
+      `Upper-Middle GDP`,
+      `High GDP`
     )
   )
 ```
 
 ::: {.callout-note appearance="minimal"}
-Median measles incidence rates vary across regions and GDP levels. **Africa and Europe show higher incidence rates among lower GDP countries**, and the Americas have very low incidence across all GDP groups. **South-East Asia and the Western Pacific**, show the **highest** incidence rates among **medium GDP** countries rather than low GDP countries.
+Median measles incidence rates vary across regions and GDP groups. The Americas show consistently **low incidence rates** across all GDP groups, and Europe has the **highest incidence rates among lower-middle GDP countries**. Africa and South-East Asia show **high incidence rates in upper-middle GDP groups**, and the Western Pacific has its highest incidence rates among **lower-middle GDP countries**.
 :::
 
 #### GDP vs. Epidemiologically linked cases
@@ -508,7 +545,6 @@ cases_gdp_year |>
 #### Temperature vs. Epi-linked cases
 
 ```{r}
-#| label: ethiopia-temp-cases-bars
 #| warning: false
 #| message: false
 #| fig-width: 8
@@ -557,7 +593,7 @@ plot_ly(
   layout(
     title = "Ethiopia's Epidemiologically Linked Measles Cases and Temperature Over Time",
     xaxis = list(title = "Year", dtick = 1),
-    yaxis = list(title = "# of Cases")
+    yaxis = list(title = "")
   )
 ```
 
@@ -565,3 +601,94 @@ plot_ly(
 Ethiopia’s epidemiologically linked measles cases were high in 2014 and 2015, and increased sharply after 2021, reaching the highest level in 2024. The temperature coloring shows that **warmer** years tend to align with the outbreak pattern, thus **rising measles counts** tend to have much warmer yearly temperature conditions.
 :::
 :::::
+
+# Data
+
+```{r}
+#| height: 30%
+#| layout: [[50, 50]]
+#| layout-valign: top
+
+htmltools::div(
+  style = "background-color: #EEF3F6;
+  padding: 10px 14px;
+  border-radius: 10px;
+  height: 125px;",
+
+  htmltools::tags$div(
+    style = "display: flex; align-items: center; gap: 10px; margin-bottom: 2px;",
+
+    htmltools::img(
+      src = "who-logo.png",
+      height = "34px"
+    ),
+
+    htmltools::h4(
+      "WHO Measles & Rubella Data",
+      style = "margin: 0;"
+    )
+  ),
+
+  htmltools::p(
+    style = "margin-top: 2px; margin-bottom: 0px; line-height: 1.2; font-size: 16px;",
+    htmltools::HTML(
+      'Monthly and yearly summaries of suspected and confirmed measles and rubella cases across countries and regions from 2012 to 2024. Data are collected through national surveillance systems and compiled by WHO. Cases are classified as clinically compatible, epidemiologically linked, or laboratory-confirmed. Source: <a href="https://github.com/rfordatascience/tidytuesday/blob/main/data/2025/2025-06-24/readme.md" target="_blank">TidyTuesday GitHub</a>.'
+    )
+  )
+)
+
+htmltools::div(
+  style = "background-color: #F9F6F1;
+  padding: 10px 14px;
+  border-radius: 10px;
+  height: 125px;",
+
+  htmltools::tags$div(
+    style = "display: flex; align-items: center; gap: 10px; margin-bottom: 2px;",
+
+    htmltools::span(
+      htmltools::HTML('<i class="bi bi-cash-stack"></i>'),
+      style = "font-size: 26px;",
+      color = "#5C4033"
+    ),
+
+    htmltools::h4(
+      "World Bank GDP Data",
+      style = "margin: 0;"
+    )
+  ),
+
+  htmltools::p(
+    style = "margin-top: 2px; margin-bottom: 0px; line-height: 1.2; font-size: 16px;",
+    htmltools::HTML(
+      'GDP per capita data for over 200 countries from 1990 to 2024. GDP per capita measures economic output relative to population and is commonly used to compare economic development across countries. Source: <a href="https://ourworldindata.org/grapher/gdp-per-capita-worldbank?tab=table&time=1991..latest&tableFilter=countries" target="_blank">Our World in Data</a>.'
+    )
+  )
+)
+```
+
+```{r}
+#| height: 70%
+#| warning: false
+#| message: false
+
+cases_gdp_year |>
+  select(
+    country,
+    region,
+    year,
+    gdp_per_capita,
+    measles_total,
+    measles_epi_linked,
+    measles_incidence_rate_per_1000000_total_population
+  ) |>
+  DT::datatable(
+    rownames = FALSE,
+    filter = "top",
+    options = list(
+      pageLength = 10,
+      scrollX = TRUE,
+      scrollY = "430px"
+    )
+  )
+```
